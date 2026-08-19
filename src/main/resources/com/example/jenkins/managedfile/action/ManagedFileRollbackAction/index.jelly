@@ -1,0 +1,54 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
+  <l:layout title="${it.displayName}">
+    <l:main-panel>
+      <h1>${it.displayName}</h1>
+      
+      <div style="margin-bottom: 10px;">
+        <a href="${rootURL}/manage/managed-file-versions/history?id=${it.fileId}">← Back to History</a>
+      </div>
+      
+      <j:choose>
+        <j:when test="${it.fileId == null or it.targetVersion == 0}">
+          <div class="alert alert-error">Missing required parameters: id and version.</div>
+        </j:when>
+        <j:otherwise>
+          <div class="alert alert-warning">
+            <p><strong>Warning:</strong> This operation will create a new version entry (rollback to V${it.targetVersion}).</p>
+          </div>
+
+          <table class="jenkins-table">
+            <tr>
+              <th>Managed File ID</th>
+              <td><code>${it.fileId}</code></td>
+            </tr>
+            <tr>
+              <th>Target Version</th>
+              <td>V${it.targetVersion}</td>
+            </tr>
+            <tr>
+              <th>Current Version</th>
+              <td>V${it.currentVersion}</td>
+            </tr>
+            <j:if test="${it.configName != ''}">
+              <tr>
+                <th>File Name</th>
+                <td>${it.configName}</td>
+              </tr>
+            </j:if>
+          </table>
+
+          <h3>Content Preview (V${it.targetVersion})</h3>
+          <pre class="managedfile-content"><j:out value="${it.targetContent}"/></pre>
+
+          <form method="post" action="confirm">
+            <input type="hidden" name="id" value="${it.fileId}"/>
+            <input type="hidden" name="version" value="${it.targetVersion}"/>
+            <button type="submit" class="jenkins-button jenkins-button--primary">Confirm Rollback</button>
+            <a href="${rootURL}/manage/managed-file-versions/history?id=${it.fileId}" class="jenkins-button">Cancel</a>
+          </form>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

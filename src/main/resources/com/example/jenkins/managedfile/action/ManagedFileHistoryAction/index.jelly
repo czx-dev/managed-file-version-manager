@@ -1,0 +1,85 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
+  <l:layout title="${it.displayName}">
+    <l:main-panel>
+      <h1>${it.displayName}</h1>
+      
+      <div style="margin-bottom: 10px;">
+        <a href="${rootURL}/manage/managed-file-versions">← Back to Managed File Versions</a>
+      </div>
+      
+      <j:choose>
+        <j:when test="${it.fileId == null}">
+          <div class="alert alert-warning">No file ID provided.</div>
+        </j:when>
+        <j:otherwise>
+          <div style="margin-bottom: 20px;">
+            <strong>File ID:</strong> <code>${it.fileId}</code>
+            <j:if test="${it.configName != ''}">
+              <br/>
+              <strong>File Name:</strong> ${it.configName}
+            </j:if>
+          </div>
+          
+          <j:choose>
+            <j:when test="${it.versions.size() == 0}">
+              <div class="alert alert-info">No version history found for this file.</div>
+            </j:when>
+            <j:otherwise>
+              <h2>Version History (${it.versions.size()} versions)</h2>
+              <table class="jenkins-table sortable">
+                <thead>
+                  <tr>
+                    <th>Version</th>
+                    <th>Operation</th>
+                    <th>User</th>
+                    <th>Time</th>
+                    <th>SHA256</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <j:forEach var="v" items="${it.versions}">
+                    <tr>
+                      <td>
+                        <j:choose>
+                          <j:when test="${v.operation.name() == 'ROLLBACK'}">
+                            <span title="Rollback from version ${v.rollbackFromVersion}">V${v.version} ↩</span>
+                          </j:when>
+                          <j:otherwise>
+                            V${v.version}
+                          </j:otherwise>
+                        </j:choose>
+                      </td>
+                      <td>
+                        <span class="build-badge">
+                          ${v.operation.name()}
+                          <j:if test="${v.operation.name() == 'ROLLBACK'}">
+                            (from V${v.rollbackFromVersion})
+                          </j:if>
+                        </span>
+                      </td>
+                      <td>${v.user}</td>
+                      <td>
+                        <j:if test="${v.timestamp != null}">
+                          ${v.timestamp}
+                        </j:if>
+                      </td>
+                      <td><code title="${v.sha256}">${v.sha256}</code></td>
+                      <td>
+                        <a href="${rootURL}/manage/managed-file-versions/view?id=${it.fileId}&amp;version=${v.version}">View</a>
+                        <j:if test="${v.version > 1}">
+                          | <a href="${rootURL}/manage/managed-file-versions/diff?id=${it.fileId}&amp;from=${v.version - 1}&amp;to=${v.version}">Diff</a>
+                        </j:if>
+                      </td>
+                    </tr>
+                  </j:forEach>
+                </tbody>
+              </table>
+            </j:otherwise>
+          </j:choose>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

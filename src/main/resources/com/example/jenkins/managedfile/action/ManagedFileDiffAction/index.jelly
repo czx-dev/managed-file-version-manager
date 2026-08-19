@@ -1,0 +1,90 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout">
+    <l:layout title="${it.displayName}">
+        <l:main-panel>
+            <h1>${it.displayName}</h1>
+            
+            <div style="margin-bottom: 10px;">
+                <a href="${rootURL}/manage/managed-file-versions/history?id=${it.fileId}">← Back to History</a>
+            </div>
+            
+            <j:choose>
+                <j:when test="${it.fileId == null or it.fromVersion == 0 or it.toVersion == 0}">
+                    <div class="alert alert-error">Missing required parameters: id, from, and to.</div>
+                    <p>Usage: <code>/manage/managed-file-versions/diff?id=FILE_ID&amp;from=VERSION&amp;to=VERSION</code></p>
+                </j:when>
+                <j:otherwise>
+                    <div style="margin-bottom: 20px;">
+                        <h3>
+                            <strong>File:</strong> <code>${it.fileId}</code>
+                        </h3>
+                    </div>
+                    
+                    <div style="display: flex; gap: 20px; margin-bottom: 20px; font-size: 14px;">
+                        <span style="color: #238636;">
+                            <strong>+${it.stats.added} additions</strong>
+                        </span>
+                        <span style="color: #da3633;">
+                            <strong>-${it.stats.removed} deletions</strong>
+                        </span>
+                        <span style="color: #6e7681;">
+                            ${it.stats.unchanged} unchanged
+                        </span>
+                    </div>
+
+                    <style>
+                        .diff-container { border: 1px solid #d0d7de; border-radius: 6px; overflow-x: auto; }
+                        .diff-table { width: 100%; border-collapse: collapse; }
+                        .diff-table th { background-color: #f6f8fa; border-bottom: 1px solid #d0d7de; padding: 8px; text-align: center; font-weight: bold; }
+                        .diff-table th:first-child { border-right: 1px solid #d0d7de; }
+                        .diff-table td { padding: 2px 8px; font-family: monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; vertical-align: top; border-bottom: 1px solid #d0d7de33; }
+                        .diff-table tr:last-child td { border-bottom: none; }
+                        .diff-table td:first-child { border-right: 1px solid #d0d7de; }
+                        .diff-table td.added-cell { background-color: #dafbe1; color: #238636; }
+                        .diff-table td.removed-cell { background-color: #ffebe9; color: #da3633; }
+                        .diff-table td.modified-old { background-color: #fff8c5; color: #9a6700; }
+                        .diff-table td.modified-new { background-color: #fff8c5; color: #9a6700; }
+                        .diff-table td.empty-cell { background-color: inherit; }
+                    </style>
+
+                    <div class="diff-container">
+                        <table class="diff-table">
+                            <tr>
+                                <th>V${it.fromVersion} (旧)</th>
+                                <th>V${it.toVersion} (新)</th>
+                            </tr>
+                            <j:forEach var="line" items="${it.sideBySideLines}">
+                                <j:choose>
+                                    <j:when test="${line.added}">
+                                        <tr class="diff-row">
+                                            <td class="empty-cell"></td>
+                                            <td class="added-cell">+ ${line.newLine}</td>
+                                        </tr>
+                                    </j:when>
+                                    <j:when test="${line.removed}">
+                                        <tr class="diff-row">
+                                            <td class="removed-cell">- ${line.oldLine}</td>
+                                            <td class="empty-cell"></td>
+                                        </tr>
+                                    </j:when>
+                                    <j:when test="${line.modified}">
+                                        <tr class="diff-row">
+                                            <td class="modified-old">~ ${line.oldLine}</td>
+                                            <td class="modified-new">~ ${line.newLine}</td>
+                                        </tr>
+                                    </j:when>
+                                    <j:otherwise>
+                                        <tr class="diff-row">
+                                            <td>${line.oldLine}</td>
+                                            <td>${line.newLine}</td>
+                                        </tr>
+                                    </j:otherwise>
+                                </j:choose>
+                            </j:forEach>
+                        </table>
+                    </div>
+                </j:otherwise>
+            </j:choose>
+        </l:main-panel>
+    </l:layout>
+</j:jelly>

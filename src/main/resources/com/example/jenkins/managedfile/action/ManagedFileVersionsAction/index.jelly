@@ -1,0 +1,43 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
+  <l:layout title="${it.displayName}" permission="${it.requiredPermission}">
+    <l:main-panel>
+      <h1>${it.displayName}</h1>
+      <p>View, diff and rollback version history for Managed Files.</p>
+      <table class="jenkins-table sortable">
+        <thead>
+          <tr>
+            <th>Managed File</th>
+            <th>ID</th>
+            <th>Versions</th>
+            <th>Latest Operation</th>
+            <th>Latest Time</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          <j:forEach var="row" items="${it.rows}">
+            <tr>
+              <td>${row.name}</td>
+              <td><code>${row.id}</code></td>
+              <td>${row.versionCount}</td>
+              <td>
+                <j:if test="${row.latestVersion != null}">
+                  ${row.latestVersion.operation}
+                </j:if>
+              </td>
+              <td>
+                <j:if test="${row.latestVersion != null}">
+                  ${row.latestVersion.timestamp}
+                </j:if>
+              </td>
+              <td>
+                <a href="history?id=${row.id}">History</a>
+              </td>
+            </tr>
+          </j:forEach>
+        </tbody>
+      </table>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>

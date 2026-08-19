@@ -1,0 +1,79 @@
+<?jelly escape-by-default='true'?>
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
+  <l:layout title="${it.displayName}">
+    <st:adjacent includes="*,/rollback*" />
+    <l:main-panel>
+      <h1>${it.displayName}</h1>
+      
+      <div style="margin-bottom: 10px;">
+        <a href="${rootURL}/manage/managed-file-versions/history?id=${it.fileId}">← Back to History</a>
+      </div>
+      
+      <j:choose>
+        <j:when test="${it.fileId == null or it.version == 0}">
+          <div class="alert alert-error">Missing required parameters: id and version.</div>
+        </j:when>
+        <j:otherwise>
+          <j:choose>
+            <j:when test="${it.metadata != null}">
+              <table class="jenkins-table" style="margin-bottom: 20px; max-width: 600px;">
+                <tbody>
+                  <tr>
+                    <td style="width: 120px;"><strong>File</strong></td>
+                    <td><code>${it.fileId}</code></td>
+                  </tr>
+                  <tr>
+                    <td><strong>Version</strong></td>
+                    <td>
+                      <j:choose>
+                        <j:when test="${it.metadata.operation.name() == 'ROLLBACK'}">
+                          V${it.version} ↩ (rollback from V${it.metadata.rollbackFromVersion})
+                        </j:when>
+                        <j:otherwise>
+                          V${it.version}
+                        </j:otherwise>
+                      </j:choose>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td><strong>Operation</strong></td>
+                    <td><span class="build-badge">${it.metadata.operation.name()}</span></td>
+                  </tr>
+                  <tr>
+                    <td><strong>User</strong></td>
+                    <td>${it.metadata.user}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Time</strong></td>
+                    <td>${it.metadata.timestamp}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>SHA256</strong></td>
+                    <td><code title="${it.metadata.sha256}">${it.metadata.sha256.substring(0, 16)}...</code></td>
+                  </tr>
+                </tbody>
+              </table>
+              
+              <div style="margin-bottom: 10px;">
+                <a href="${rootURL}/manage/managed-file-versions/history?id=${it.fileId}" class="jenkins-button">← Back</a>
+                <j:if test="${it.previousVersion > 0}">
+                  <a href="${rootURL}/manage/managed-file-versions/diff?id=${it.fileId}&amp;from=${it.previousVersion}&amp;to=${it.version}" class="jenkins-button">View Diff from V${it.previousVersion}</a>
+                </j:if>
+              </div>
+            </j:when>
+            <j:otherwise>
+              <div class="alert alert-warning">Version metadata not found.</div>
+              <p><strong>File:</strong> <code>${it.fileId}</code></p>
+              <p><strong>Version:</strong> V${it.version}</p>
+            </j:otherwise>
+          </j:choose>
+          
+          <h3>Content</h3>
+          <div style="border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden;">
+            <pre class="managedfile-content" style="margin: 0; padding: 16px; background-color: #f6f8fa; font-family: monospace; font-size: 13px; line-height: 1.5; overflow-x: auto;"><j:out value="${it.content}"/></pre>
+          </div>
+        </j:otherwise>
+      </j:choose>
+    </l:main-panel>
+  </l:layout>
+</j:jelly>
