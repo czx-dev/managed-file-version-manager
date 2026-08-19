@@ -20,7 +20,7 @@
     <description>
         Adds version history, version diff, version rollback, and audit trail for
         Managed Files provided by the Config File Provider plugin.
-    </description>
+    </description>  
 
     <properties>
         <jenkins.version>2.568.2</jenkins.version>
