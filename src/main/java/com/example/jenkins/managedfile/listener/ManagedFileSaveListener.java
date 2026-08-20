@@ -1,6 +1,7 @@
 package com.example.jenkins.managedfile.listener;
 
 import com.example.jenkins.managedfile.service.ManagedFileVersionService;
+import com.example.jenkins.managedfile.store.GroupStore;
 import com.example.jenkins.managedfile.store.VersionStore;
 import hudson.Extension;
 import hudson.XmlFile;
@@ -29,6 +30,7 @@ public class ManagedFileSaveListener extends SaveableListener {
     public void init() {
         try {
             VersionStore.getInstance().init();
+            GroupStore.getInstance().init();
             ManagedFileVersionService.getInstance().initialiseSnapshot();
         } catch (Throwable t) {
             LOGGER.log(Level.WARNING, "Managed File Version Manager failed to initialise", t);

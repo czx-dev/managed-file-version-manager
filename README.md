@@ -1,260 +1,282 @@
 # Managed File Version Manager
 
-[![Jenkins Plugin](https://img.shields.io/badge/Jenkins-插件-blue.svg)](https://www.jenkins.io/)
-[![Java](https://img.shields.io/badge/Java-25-orange.svg)](https://openjdk.org/projects/jdk/25/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+A Jenkins plugin that adds **version history**, **diff**, **rollback**, and **grouping** on top of
+Managed Files provided by the [Config File Provider](https://plugins.jenkins.io/config-file-provider/)
+plugin.
 
-一个 Jenkins 插件，为 [Config File Provider](https://plugins.jenkins.io/config-file-provider/) 插件管理的 **Managed File** 提供**版本历史**、**并排对比**、**一键回滚**和**审计追踪**能力。
-
----
-
-## 简介
-
-当你把数据库连接信息、Kubernetes 配置、构建脚本、共享工具脚本等放到 Config File Provider 的 Managed File 里后，一旦改动就再也无法回看"之前是什么样子"——本插件正是为了解决这个痛点。
-
-每次有人**新建 / 修改 / 删除** Managed File，插件都会自动记录一个不可变的版本；每个版本都带作者、时间戳、操作类型和 SHA-256 摘要。出现误改时，可以一键回滚到任意历史版本，回滚本身也会被记录为一个新版本（append-only），形成完整的审计链。
+> Built for Jenkins `2.568.2` and JDK 25.
 
 ---
 
-## 功能特性
+## What it does
 
-- **自动版本化** — Managed File 的 CREATE / UPDATE / DELETE 都会被捕获为版本，无需手工干预。
-- **仅追加的历史** — 版本永不覆盖；回滚生成新版本而不是删除原记录。
-- **并排 diff 查看器** — 任意两个版本之间的逐行对比，新增（`+`）、删除（`-`）、修改（`~`）三种标记分别用绿/红/黄高亮。
-- **两段式回滚** — 先展示目标版本与当前内容，确认后再写入，避免误操作。
-- **完整审计信息** — 每次变更都记录操作人、用户 ID、时间戳、操作类型、内容 SHA-256。
-- **崩溃安全** — 每个版本以独立目录存储，包含元数据 XML 与内容快照，单个版本损坏不影响其它版本。
-- **并发安全** — 每个文件 ID 一把 `ReentrantLock`，叠加 Jenkins listener 钩子，保证并发保存下的历史一致性。
+Every time a Managed File is **created / updated / rolled back / deleted**, this plugin captures the
+full content plus metadata (user, timestamp, sha-256, comment) and stores it as an immutable
+version. From the management page you can then:
+
+- View the **full history** of any managed file
+- **Diff** any two versions (side-by-side)
+- **View** the raw content of any historical version
+- **Rollback** to any prior version (creates a new version, never mutates history)
+- **Group** managed files under user-defined categories and filter the list by group
+
+The plugin is intentionally non-destructive: history is append-only, and `metadata.xml` is
+human-readable XML.
 
 ---
 
-## 工作原理
+## Quick start
+
+1. Install the plugin (`.hpi` from your `mvn package` build, or drop it into `$JENKINS_HOME/plugins`).
+2. Restart Jenkins.
+3. Open **Manage Jenkins → Managed File Versions**.
+4. Manage Files through the existing *Config File Provider* UI; this plugin will silently capture
+   every save.
+
+---
+
+## Features
+
+### Versioning (transparent, automatic)
+
+Hooks into Jenkins' `SaveableListener` so every save/delete of `GlobalConfigFiles` is captured:
+
+| Operation | When recorded | Storage path |
+|-----------|---------------|--------------|
+| `CREATE`  | First save of a new managed file | `<id>/1/content` + `metadata.xml` |
+| `UPDATE`  | Subsequent saves with content change | `<id>/<n>/content` + `metadata.xml` |
+| `ROLLBACK`| After a rollback completes | `<id>/<n>/content` + `metadata.xml` |
+| `DELETE`  | When a managed file is removed | `<id>/<n>/content` + `metadata.xml` (kept) |
+
+Versions are deduplicated by `sha-256`: if you click Save twice without changing anything, no
+spurious new version is recorded.
+
+### Diff (side-by-side)
+
+`/manage/managed-file-versions/diff?id=<id>&from=<v1>&to=<v2>` renders a paired old/new diff
+using a hand-rolled Myers LCS implementation (no external diff library).
+
+### Rollback (two-stage confirmation)
+
+`/manage/managed-file-versions/rollback?id=<id>&version=<v>` first renders a confirmation page
+with current vs. target content side-by-side, then POSTs to actually perform the rollback. The
+rollback creates a **new** version (operation = `ROLLBACK`) instead of mutating history, so the
+audit trail stays intact.
+
+### Groups
+
+User-defined labels (id + display name + description). Files can be assigned to one group. The
+list view supports:
+
+- Search by name
+- Filter by group
+- Sort by name / id / version count / latest operation time
+- Inline group selector (auto-submits on change)
+- Inline delete with confirmation
+
+Group membership is stored in a sidecar JSON file; it is purely metadata and never touches the
+file provider's own storage.
+
+### In-place refresh
+
+All write actions (create group, delete group, assign file, delete file) render the management
+page **in place** rather than redirecting — scroll position, filters, sort and URL all survive.
+Delete actions still prompt for confirmation in the browser to prevent accidental F5 re-submits.
+
+---
+
+## Storage layout
 
 ```
-GlobalConfigFiles 保存 ──▶ SaveableListener ──▶ ManagedFileVersionService
-                                                       │
-                                                       ├── 与内存快照做 diff
-                                                       ├── VersionStore.writeVersion
-                                                       │     ├── <JENKINS_HOME>/managed-file-version-manager/<fileId>/<version>/content
-                                                       │     └── <JENKINS_HOME>/managed-file-version-manager/<fileId>/<version>/metadata.xml
-                                                       └── 更新内存快照
+$JENKINS_HOME/
+└── managed-file-version-manager/
+    ├── groups.json              ← group definitions + file → group assignments
+    └── <fileId>/               ← one folder per managed file
+        └── <version>/          ← versions start at 1, monotonically increasing
+            ├── content         ← raw text of the managed file
+            └── metadata.xml    ← version, fileId, fileName, user, userId, timestamp,
+                                  operation, rollbackFromVersion, sha256, comment
 ```
 
-1. **启动初始化** — Jenkins 启动时，`ManagedFileSaveListener#init` 调用 `initialiseSnapshot()`，从 `GlobalConfigFiles` 当前状态构建内存快照。这样可以避免对磁盘上早已存在的文件产生伪 `CREATE` 记录。
-2. **变更捕获** — `GlobalConfigFiles` 每次保存或删除，`ManagedFileSaveListener#onChange`（或 `#onDeleted`）调用 `recordSnapshot()`。Service 对比快照，得出 CREATE/UPDATE/DELETE 增量并落盘。
-3. **版本对比** — `ManagedFileDiffAction` 读取任意两个版本，用 Myers LCS 算法（`DiffUtil`）计算行级 diff，并渲染为并排 Jelly 视图。
-4. **回滚** — `ManagedFileRollbackAction` 读取目标版本内容，写回 `Config`，先记录一个指向原版本的 `ROLLBACK` 版本，再触发 `GlobalConfigFiles.save()` 让 listener 刷新快照。
+The exact storage path is shown at the top of the management page ("Storage: ...").
+
+### `groups.json` format
+
+```json
+{
+  "groups": [
+    { "id": "production", "name": "Production", "description": "live configs" }
+  ],
+  "assignments": {
+    "my-config-id": "production"
+  }
+}
+```
+
+Hand-rolled JSON parser keeps the dependency footprint flat (no Jackson).
 
 ---
 
-## 安装
+## UI tour
 
-### 方式一：上传 `.hpi`
+```
+Manage Jenkins → Managed File Versions
+├── Toolbar
+│   ├── Search name: [________]  Group: [▼]  [Apply]  [Reset]
+│   └── [+ New Managed File]
+├── Managed Files (n)
+│   └── table: Name | ID | Group | Versions | Latest Op | Latest Time | Actions
+└── Groups
+    ├── Create form (ID, Name, Description)
+    └── table: ID | Name | Description | Actions
+```
+
+Each row in the file table exposes `History`, `Edit` (delegates to Config File Provider),
+`Delete`, and an inline group `<select>`.
+
+Each row in the groups table exposes `Delete` (with confirm).
+
+---
+
+## Architecture
+
+```
+listener/   ManagedFileSaveListener     ← @Extension, hooks SaveableListener.onChange / onDeleted
+service/    ManagedFileVersionService   ← snapshot diff, decides CREATE / UPDATE / DELETE / ROLLBACK
+store/      VersionStore                ← disk I/O, per-file locks, sha-256 dedup
+store/      GroupStore                  ← sidecar JSON for groups + assignments
+model/      ManagedFileVersion, Operation, Group, ConfigSnapshot, SimpleConfig
+util/       Sha256Util, DiffUtil        ← tiny helpers, no external deps
+action/     ManagedFileVersionsAction   ← @Extension, ManagementLink, index page + group POSTs
+action/     ManagedFileHistoryAction    ← per-file history view
+action/     ManagedFileDiffAction       ← side-by-side diff
+action/     ManagedFileRollbackAction   ← two-stage rollback
+action/     ManagedFileViewVersionAction← raw content of a single version
+```
+
+### Data flow for an edit
+
+```
+User saves a Managed File
+        │
+        ▼
+SaveableListener.onChange
+        │
+        ▼
+ManagedFileVersionService.recordSnapshot
+        │  (in-memory snapshot map compared to current GlobalConfigFiles state)
+        ▼
+VersionStore.saveVersion
+        │
+        ▼
+<fileId>/<n>/{content, metadata.xml}
+```
+
+### Data flow for a rollback
+
+```
+POST /rollback (id, version)
+        │
+        ▼
+ManagedFileRollbackAction.doConfirm
+        ├── load target content from VersionStore
+        ├── mutate Config via reflection / provider.newConfig
+        ├── ManagedFileVersionService.recordRollback  ── writes the ROLLBACK version directly
+        └── GlobalConfigFiles.save                    ── triggers SaveableListener,
+                                                       but rememberSnapshot() pre-loads
+                                                       the snapshot map so no duplicate
+                                                       UPDATE version is created
+```
+
+---
+
+## Endpoints
+
+| URL                                                                                | Method | Purpose                           |
+|------------------------------------------------------------------------------------|--------|-----------------------------------|
+| `/manage/managed-file-versions/`                                                   | GET    | List + filter                     |
+| `/manage/managed-file-versions/history?id=<fileId>`                                | GET    | Full version history              |
+| `/manage/managed-file-versions/view?id=<fileId>&version=<n>`                       | GET    | Raw content of one version        |
+| `/manage/managed-file-versions/diff?id=<fileId>&from=<v1>&to=<v2>`                 | GET    | Side-by-side diff                 |
+| `/manage/managed-file-versions/rollback?id=<fileId>&version=<n>`                   | GET    | Confirmation page                 |
+| `/manage/managed-file-versions/rollback/doConfirm`                                 | POST   | Perform rollback                  |
+| `/manage/managed-file-versions/createGroup`                                        | POST   | Create a group (in-place)         |
+| `/manage/managed-file-versions/deleteGroup`                                        | POST   | Delete a group (in-place)         |
+| `/manage/managed-file-versions/assign`                                             | POST   | Assign / unassign file → group    |
+| `/manage/managed-file-versions/deleteConfig`                                       | POST   | Delete managed file (in-place)    |
+
+---
+
+## Permissions
+
+Permission checks were intentionally removed per project decision — endpoints are open. (See
+`ManagedFileDiffAction.checkPermission` and `ManagedFileViewVersionAction.checkPermission`.)
+You can re-add `Jenkins.ADMINISTER` checks if your environment requires them.
+
+---
+
+## Build
 
 ```bash
-mvn clean package -DskipTests
+mvn -B clean package
 ```
 
-产物：`target/managed-file-version-manager.hpi`。
+Produces `target/managed-file-version-manager.hpi`. Requires JDK 25.
 
-Jenkins 后台：**Manage Jenkins → Plugins → Advanced → Deploy Plugin**，选择该 `.hpi` 上传即可。
-
-### 方式二：从源码构建并运行
-
-```bash
-git clone https://github.com/<your-org>/jenkins-extend-config-file-provider.git
-cd jenkins-extend-config-file-provider/managed-file-version-manager
-mvn clean package
-```
-
-开发期启动一个带插件的 Jenkins：
+To run a local Jenkins with the plugin installed:
 
 ```bash
 mvn hpi:run
 ```
 
-启动后访问 `http://localhost:8080/jenkins`。
+---
+
+## Development notes
+
+- **Snapshot initialization** (`ManagedFileVersionService.initialiseSnapshot`) is run at plugin
+  start-up so that an existing Managed File does not get a spurious `CREATE` entry on the first
+  save after a restart.
+- **Rollback snapshot sync**: `ManagedFileRollbackAction` calls `recordRollback` *after*
+  `GlobalConfigFiles.save`, so the snapshot map stays consistent with the new content. The
+  alternative (writing the version first and then having the SaveableListener trigger another
+  `UPDATE`) is explicitly avoided.
+- **No external diff library**: `DiffUtil` is a Myers LCS implementation sized for small
+  Managed Files. For multi-megabyte configs you may want to switch to `java-diff-utils`.
+- **Hand-rolled JSON**: `GroupStore` parses and serialises `groups.json` by hand to keep the
+  dependency surface flat. The schema is intentionally trivial; anything beyond the canonical
+  shape is rejected.
+- **In-place rendering**: `ManagedFileVersionsAction.renderInPlace()` uses
+  `HttpResponses.forwardToView` to re-render the same view without a 302. This preserves scroll
+  position and form state — but it does mean F5 re-submits the form, so delete buttons have a
+  browser `confirm()` guard.
 
 ---
 
-## 环境要求
-
-| 组件 | 版本 |
-| --- | --- |
-| Jenkins | 2.568.2 或更新（LTS） |
-| JDK | 25 |
-| Config File Provider 插件 | 1013.v73c323e52b_1f 或更新 |
-
----
-
-## 使用指南
-
-### 入口
-
-Jenkins 后台：**Manage Jenkins → Managed File Versions**。索引页列出所有 Managed File，并显示最新版本号（若没有历史记录则会提示）。
-
-### 查看历史
-
-点击某行右侧的 **History**，进入该文件的版本历史页。版本按从新到旧排序，每行展示：
-
-- 版本号
-- 操作类型（`CREATE` / `UPDATE` / `DELETE` / `ROLLBACK`）
-- 作者（显示名 + 用户 ID）
-- 时间戳
-- 内容 SHA-256
-- 备注（如 `"Rollback to version 5"`）
-
-每行有三个动作按钮：
-
-| 动作 | 作用 |
-| --- | --- |
-| **View** | 渲染该版本的原始文件内容 |
-| **Diff** | 与所选版本并排对比 |
-| **Rollback** | 两段式确认 → 写入新 `ROLLBACK` 版本 |
-
-### 对比任意两个版本
-
-在某版本行点击 **Diff**，在下拉框中选择"对比版本"。查看器布局：
-
-- 表头：左侧 `V<n> (旧)`，右侧 `V<m> (新)`
-- 绿色行带 `+` —— 仅新版本有
-- 红色行带 `-` —— 仅旧版本有
-- 黄色行带 `~` —— 成对修改
-- 普通行 —— 未变化上下文
-
-底部汇总 `added / removed / unchanged` 行数。
-
-### 回滚到历史版本
-
-1. 在历史页点击目标版本右侧的 **Rollback**
-2. 在确认页查看"目标版本内容 vs 当前内容"，确认无误后提交
-3. 提交后自动跳回历史页，最顶部出现一个新的 `ROLLBACK` 版本
-
-> 回滚是仅追加的。原本"出错"的版本依然保留——任何时候都可以再次回滚到它。
-
----
-
-## 存储布局
-
-所有版本数据位于 `$JENKINS_HOME/managed-file-version-manager/`：
-
-```
-managed-file-version-manager/
-└── <fileId>/                    # 例如 my-pipeline-config
-    ├── 1/                       # 版本号
-    │   ├── content              # 该版本的完整文件内容
-    │   └── metadata.xml         # 版本、作者、时间戳、sha256 等
-    ├── 2/
-    │   ├── content
-    │   └── metadata.xml
-    └── 3/
-        ├── content
-        └── metadata.xml
-```
-
-### `metadata.xml` 结构示例
-
-```xml
-<version>
-    <version>3</version>
-    <fileId>my-pipeline-config</fileId>
-    <fileName>my-pipeline-config</fileName>
-    <user>张三</user>
-    <userId>zhangsan</userId>
-    <timestamp>2026-08-19T09:12:33Z</timestamp>
-    <operation>UPDATE</operation>
-    <rollbackFromVersion></rollbackFromVersion>
-    <sha256>e3b0c44298fc1c149afbf4c8996fb924...</sha256>
-    <comment></comment>
-</version>
-```
-
-`operation` 取值：`CREATE`、`UPDATE`、`DELETE`、`ROLLBACK`。`rollbackFromVersion` 仅在回滚记录中有值。
-
----
-
-## 目录结构
+## Project layout
 
 ```
 managed-file-version-manager/
 ├── pom.xml
-└── src/
-    ├── main/
-    │   ├── java/com/example/jenkins/managedfile/
-    │   │   ├── action/
-    │   │   │   ├── ManagedFileVersionsAction.java   # Manage Jenkins 入口
-    │   │   │   ├── ManagedFileHistoryAction.java    # 单文件历史页
-    │   │   │   ├── ManagedFileViewVersionAction.java
-    │   │   │   ├── ManagedFileDiffAction.java
-    │   │   │   └── ManagedFileRollbackAction.java
-    │   │   ├── listener/
-    │   │   │   └── ManagedFileSaveListener.java     # 监听 GlobalConfigFiles 保存/删除
-    │   │   ├── model/                                # ManagedFileVersion、ConfigSnapshot 等
-    │   │   ├── service/
-    │   │   │   └── ManagedFileVersionService.java   # diff / recordSnapshot 调度
-    │   │   ├── store/
-    │   │   │   └── VersionStore.java                 # 文件系统 + XML 持久化
-    │   │   └── util/                                 # Sha256Util、DiffUtil
-    │   └── resources/
-    │       ├── index.jelly                           # 插件描述
-    │       └── com/example/jenkins/managedfile/action/.../index.jelly
-    └── test/
-        └── java/com/example/jenkins/managedfile/
-            ├── service/                              # NoChangeTest、ConcurrentTest
-            ├── store/VersionStoreTest.java
-            └── util/Sha256UtilTest.java
+└── src/main/
+    ├── java/com/example/jenkins/managedfile/
+    │   ├── action/       ← 5 Stapler actions + ManagementLink
+    │   ├── listener/     ← SaveableListener @Extension
+    │   ├── model/        ← immutable POJOs + Operation enum
+    │   ├── service/      ← snapshot diff & orchestration
+    │   ├── store/        ← VersionStore + GroupStore
+    │   └── util/         ← Sha256 + Diff
+    └── resources/
+        ├── index.jelly                                ← plugin descriptor body
+        └── com/example/jenkins/managedfile/action/
+            ├── ManagedFileVersionsAction/index.jelly  ← management page
+            ├── ManagedFileHistoryAction/index.jelly
+            ├── ManagedFileDiffAction/index.jelly
+            ├── ManagedFileRollbackAction/index.jelly
+            └── ManagedFileViewVersionAction/index.jelly
 ```
 
 ---
 
-## 开发
+## License
 
-### 构建与测试
-
-```bash
-mvn clean verify
-```
-
-Surefire 报告位于 `target/surefire-reports/`。覆盖范围：
-
-- `VersionStoreTest` —— 持久化往返、fileId 校验、锁语义
-- `Sha256UtilTest` —— 哈希稳定性
-- `NoChangeTest` / `ConcurrentTest` —— 快照无变化场景以及并发保存下的行为
-
-### 接入真实 Jenkins 调试
-
-```bash
-mvn hpi:run -Djenkins.version=2.568.2
-```
-
-启动后在 **Manage Jenkins → Managed Config Files** 创建几个 Managed File，反复编辑几次，即可看到每个保存都自动产生新版本。
-
----
-
-## 安全考量
-
-- fileId 在写入文件系统前会用正则 `[A-Za-z0-9._\-]+` 校验，防止路径穿越。
-- 每个 fileId 持有一把 `ReentrantLock`，序列化单文件的并发写；跨文件操作互不影响。
-- listener 中所有路径都包裹在 `try/catch`，单个文件的失败不会拖垮 Jenkins。
-- 版本数据位于 `JENKINS_HOME`，依赖运维的常规 Jenkins 备份策略；插件本身未实现保留策略，版本会持续累积直到手工清理。
-
----
-
-## 后续规划
-
-- 版本保留 / 清理策略（每个文件仅保留最近 N 个版本）
-- 历史全文 / 正则搜索
-- 一键导出历史归档
-- 回滚时触发审计 webhook
-
----
-
-## 许可证
-
-本项目基于 [MIT 许可证](LICENSE) 发布。
-
----
-
-## 致谢
-
-基于 Jenkins 社区的 [Config File Provider](https://plugins.jenkins.io/config-file-provider/) 插件构建，感谢 Dominik Bartholdi 及所有贡献者。
+Internal / project license — see your project's `LICENSE`.

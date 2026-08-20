@@ -1,43 +1,201 @@
 <?jelly escape-by-default='true'?>
-<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler">
+<j:jelly xmlns:j="jelly:core" xmlns:l="/lib/layout" xmlns:st="jelly:stapler" xmlns:f="/lib/form">
   <l:layout title="${it.displayName}" permission="${it.requiredPermission}">
     <l:main-panel>
       <h1>${it.displayName}</h1>
-      <p>View, diff and rollback version history for Managed Files.</p>
-      <table class="jenkins-table sortable">
-        <thead>
-          <tr>
-            <th>Managed File</th>
-            <th>ID</th>
-            <th>Versions</th>
-            <th>Latest Operation</th>
-            <th>Latest Time</th>
-            <th>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          <j:forEach var="row" items="${it.rows}">
-            <tr>
-              <td>${row.name}</td>
-              <td><code>${row.id}</code></td>
-              <td>${row.versionCount}</td>
-              <td>
-                <j:if test="${row.latestVersion != null}">
-                  ${row.latestVersion.operation}
-                </j:if>
-              </td>
-              <td>
-                <j:if test="${row.latestVersion != null}">
-                  ${row.latestVersion.timestamp}
-                </j:if>
-              </td>
-              <td>
-                <a href="history?id=${row.id}">History</a>
-              </td>
-            </tr>
-          </j:forEach>
-        </tbody>
-      </table>
+      <p>View, diff and rollback version history for Managed Files. Use the controls below to search, group and sort the list.</p>
+      <p style="color: #57606a; font-size: 12px; margin-top: 4px;">Storage: <code>${it.storagePath}</code></p>
+
+      <style>
+        .mfvm-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; padding: 10px; background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; }
+        .mfvm-toolbar form { display: inline-flex; gap: 6px; align-items: center; margin: 0; }
+        .mfvm-toolbar input[type="text"], .mfvm-toolbar select { padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 4px; font-size: 13px; }
+        .mfvm-toolbar button { font-size: 13px; }
+        .mfvm-sort-th a { text-decoration: none; color: inherit; }
+        .mfvm-sort-th a:hover { text-decoration: underline; }
+        .mfvm-sort-indicator { color: #57606a; margin-left: 4px; font-size: 11px; }
+        .mfvm-section-title { margin-top: 24px; }
+        .mfvm-group-row { display: flex; align-items: center; gap: 12px; padding: 6px 10px; border-bottom: 1px solid #d0d7de33; }
+        .mfvm-group-row:last-child { border-bottom: none; }
+        .mfvm-group-row code { background: #f6f8fa; padding: 2px 6px; border-radius: 4px; }
+        .mfvm-inline-form { display: inline; margin: 0; }
+        .mfvm-inline-form select { padding: 3px 6px; font-size: 12px; border: 1px solid #d0d7de; border-radius: 4px; }
+        .mfvm-empty { padding: 20px; color: #57606a; font-style: italic; }
+      </style>
+
+      <!-- Toolbar: search, group filter, reset -->
+      <div style="margin-bottom: 12px;">
+        <a href="${rootURL}/configfiles/selectProvider" class="jenkins-button jenkins-button--primary">+ New Managed File</a>
+      </div>
+      <div class="mfvm-toolbar">
+        <form method="get" action=".">
+          <label>Search name:
+            <input type="text" name="q" value="${it.query}" placeholder="filter by name..."/>
+          </label>
+          <label>Group:
+            <select name="group">
+              <option value="">(all)</option>
+              <j:forEach var="g" items="${it.groups}">
+                <j:choose>
+                  <j:when test="${g.id == it.groupFilter}">
+                    <option value="${g.id}" selected="selected">${g.name}</option>
+                  </j:when>
+                  <j:otherwise>
+                    <option value="${g.id}">${g.name}</option>
+                  </j:otherwise>
+                </j:choose>
+              </j:forEach>
+            </select>
+          </label>
+          <button type="submit" class="jenkins-button jenkins-button--primary">Apply</button>
+        </form>
+        <a href="." class="jenkins-button">Reset</a>
+      </div>
+
+      <!-- File list -->
+      <h2 class="mfvm-section-title">Managed Files (${it.filteredRows.size()})</h2>
+      <j:choose>
+        <j:when test="${it.filteredRows.size() == 0}">
+          <div class="mfvm-empty">No managed files match the current filter.</div>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table sortable">
+            <thead>
+              <tr>
+                <th class="mfvm-sort-th"><a href="${it.sortUrl('name')}">Name${it.sortKey == 'name' ? (it.sortDir == 'desc' ? ' ▼' : ' ▲') : ''}</a></th>
+                <th class="mfvm-sort-th"><a href="${it.sortUrl('id')}">ID${it.sortKey == 'id' ? (it.sortDir == 'desc' ? ' ▼' : ' ▲') : ''}</a></th>
+                <th>Group</th>
+                <th class="mfvm-sort-th"><a href="${it.sortUrl('versions')}">Versions${it.sortKey == 'versions' ? (it.sortDir == 'desc' ? ' ▼' : ' ▲') : ''}</a></th>
+                <th>Latest Operation</th>
+                <th class="mfvm-sort-th"><a href="${it.sortUrl('time')}">Latest Time${it.sortKey == 'time' ? (it.sortDir == 'desc' ? ' ▼' : ' ▲') : ''}</a></th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="row" items="${it.filteredRows}">
+                <tr>
+                  <td>${row.name}</td>
+                  <td><code>${row.id}</code></td>
+                  <td>
+                    <j:choose>
+                      <j:when test="${row.groupId != ''}">
+                        <code title="${row.groupDisplayName}">${row.groupDisplayName}</code>
+                      </j:when>
+                      <j:otherwise>
+                        <span style="color: #6e7681;">—</span>
+                      </j:otherwise>
+                    </j:choose>
+                  </td>
+                  <td>${row.versionCount}</td>
+                  <td>
+                    <j:if test="${row.latestVersion != null}">
+                      ${row.latestVersion.operation}
+                    </j:if>
+                  </td>
+                  <td>
+                    <j:if test="${row.latestVersion != null}">
+                      ${row.latestVersion.timestamp}
+                    </j:if>
+                  </td>
+                  <td>
+                    <a href="history?id=${row.id}">History</a>
+                    <a href="${rootURL}/configfiles/editConfig?id=${row.id}" style="margin-left: 8px;">Edit</a>
+                    <form method="post" action="deleteConfig" class="mfvm-inline-form" style="margin-left: 8px;"
+                          onsubmit="return confirm('Delete managed file ${row.id}? This will also remove it from Config File Provider.');">
+                      <input type="hidden" name="fileId" value="${row.id}"/>
+                      <input type="hidden" name="q" value="${it.query}"/>
+                      <input type="hidden" name="group" value="${it.groupFilter}"/>
+                      <input type="hidden" name="sort" value="${it.sortKey}"/>
+                      <input type="hidden" name="dir" value="${it.sortDir}"/>
+                      <button type="submit" class="jenkins-button jenkins-button--danger">Delete</button>
+                    </form>
+                    <form method="post" action="assign" class="mfvm-inline-form" style="margin-left: 8px;">
+                      <input type="hidden" name="fileId" value="${row.id}"/>
+                      <input type="hidden" name="q" value="${it.query}"/>
+                      <input type="hidden" name="group" value="${it.groupFilter}"/>
+                      <input type="hidden" name="sort" value="${it.sortKey}"/>
+                      <input type="hidden" name="dir" value="${it.sortDir}"/>
+                      <select name="groupId" onchange="this.form.submit()">
+                        <option value="">(no group)</option>
+                        <j:forEach var="g" items="${it.groups}">
+                          <j:choose>
+                            <j:when test="${g.id == row.groupId}">
+                              <option value="${g.id}" selected="selected">${g.name}</option>
+                            </j:when>
+                            <j:otherwise>
+                              <option value="${g.id}">${g.name}</option>
+                            </j:otherwise>
+                          </j:choose>
+                        </j:forEach>
+                      </select>
+                      <noscript>
+                        <button type="submit" class="jenkins-button">Apply</button>
+                      </noscript>
+                    </form>
+                  </td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+        </j:otherwise>
+      </j:choose>
+
+      <!-- Group management -->
+      <h2 class="mfvm-section-title">Groups</h2>
+      <form method="post" action="createGroup" class="mfvm-toolbar">
+        <label>ID:
+          <input type="text" name="groupId" placeholder="e.g. production" required="required"/>
+        </label>
+        <label>Name:
+          <input type="text" name="groupName" placeholder="display name"/>
+        </label>
+        <label>Description:
+          <input type="text" name="description" placeholder="optional"/>
+        </label>
+        <input type="hidden" name="q" value="${it.query}"/>
+        <input type="hidden" name="group" value="${it.groupFilter}"/>
+        <input type="hidden" name="sort" value="${it.sortKey}"/>
+        <input type="hidden" name="dir" value="${it.sortDir}"/>
+        <button type="submit" class="jenkins-button jenkins-button--primary">Create Group</button>
+      </form>
+
+      <j:choose>
+        <j:when test="${it.groups.size() == 0}">
+          <div class="mfvm-empty">No groups defined yet.</div>
+        </j:when>
+        <j:otherwise>
+          <table class="jenkins-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              <j:forEach var="g" items="${it.groups}">
+                <tr>
+                  <td><code>${g.id}</code></td>
+                  <td>${g.name}</td>
+                  <td>${g.description}</td>
+                  <td>
+                    <form method="post" action="deleteGroup" class="mfvm-inline-form"
+                          onsubmit="return confirm('Delete group ${g.id}? Files in this group will become unassigned.');">
+                      <input type="hidden" name="groupId" value="${g.id}"/>
+                      <input type="hidden" name="q" value="${it.query}"/>
+                      <input type="hidden" name="group" value="${it.groupFilter}"/>
+                      <input type="hidden" name="sort" value="${it.sortKey}"/>
+                      <input type="hidden" name="dir" value="${it.sortDir}"/>
+                      <button type="submit" class="jenkins-button jenkins-button--danger">Delete</button>
+                    </form>
+                  </td>
+                </tr>
+              </j:forEach>
+            </tbody>
+          </table>
+        </j:otherwise>
+      </j:choose>
     </l:main-panel>
   </l:layout>
 </j:jelly>
