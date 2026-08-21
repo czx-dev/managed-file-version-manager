@@ -14,6 +14,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -285,7 +286,7 @@ public class GroupStore {
             // @PostConstruct should have created it, but defensive
             // mkdirs() makes this robust to first-use before initialiseSnapshot
             // or a misconfigured JENKINS_HOME.
-            File parent = target.getParent().toFile();
+            File parent = Objects.requireNonNull(target.getParent(), "groups.json target must have a parent").toFile();
             if (!parent.exists() && !parent.mkdirs()) {
                 throw new IOException("Cannot create parent dir: " + parent);
             }

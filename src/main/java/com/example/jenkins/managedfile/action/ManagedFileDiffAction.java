@@ -91,16 +91,12 @@ public class ManagedFileDiffAction implements Action, ModelObject {
     public List<DiffUtil.DiffLine> getDiffLines() {
         String a = getFromContent();
         String b = getToContent();
-        if (a == null) a = "";
-        if (b == null) b = "";
         return DiffUtil.diff(a, b);
     }
 
     public List<DiffUtil.SideBySideLine> getSideBySideLines() {
         String a = getFromContent();
         String b = getToContent();
-        if (a == null) a = "";
-        if (b == null) b = "";
         return DiffUtil.sideBySide(a, b);
     }
 

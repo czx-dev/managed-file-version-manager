@@ -67,14 +67,4 @@ public class ManagedFileSaveListener extends SaveableListener {
         ManagedFileVersionService.getInstance().recordSnapshot();
     }
 
-    /**
-     * Visible for testing only.
-     */
-    public static boolean isInitialised() {
-        try {
-            return Jenkins.get() != null;
-        } catch (Throwable t) {
-            return false;
-        }
-    }
 }
