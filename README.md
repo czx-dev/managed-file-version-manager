@@ -1,6 +1,6 @@
 # Managed File Version Manager
 
-> English | [简体中文](./README.md)
+> [English](./README_en.md) | [简体中文](./README.md)
 
 一个 Jenkins 插件，基于 [Config File Provider](https://plugins.jenkins.io/config-file-provider/) 插件提供的托管文件（Managed Files），增加了**版本历史**、**差异对比**、**版本回滚**和**分组管理**功能。
 

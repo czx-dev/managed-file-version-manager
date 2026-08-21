@@ -1,6 +1,6 @@
 # Managed File Version Manager
 
-> English | [简体中文](./README.md)
+> [English](./README_en.md) | [简体中文](./README.md)
 
 A Jenkins plugin that adds **version history**, **diff**, **rollback**, and **grouping** on top of
 Managed Files provided by the [Config File Provider](https://plugins.jenkins.io/config-file-provider/)
