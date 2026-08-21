@@ -1,5 +1,8 @@
 package com.example.jenkins.managedfile.store;
 
+import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONReader;
+import com.alibaba.fastjson2.JSONWriter;
 import com.example.jenkins.managedfile.model.Group;
 import jenkins.model.Jenkins;
 
@@ -33,9 +36,9 @@ import java.util.regex.Pattern;
  * }
  * </pre>
  *
- * <p>Hand-rolled parsing keeps the dependency surface flat (no Jackson). The
- * store is concurrency-safe with a single {@link ReentrantLock}; traffic is
- * low (UI edits only) so contention is irrelevant.</p>
+ * <p>JSON (de)serialisation is delegated to fastjson2. The store is
+ * concurrency-safe with a single {@link ReentrantLock}; traffic is low
+ * (UI edits only) so contention is irrelevant.</p>
  */
 public class GroupStore {
 
@@ -307,191 +310,56 @@ public class GroupStore {
 
     // ---------- (de)serialisation ----------
     //
-    // Hand-rolled to keep the dependency footprint flat. The format is
-    // intentionally trivial: a flat object with two known keys. Anything
-    // else is rejected.
+    // Delegated to fastjson2. We carry state as POJOs and let fastjson2 do the
+    // pretty-printing / parsing. Pretty format keeps diffs of groups.json
+    // human-readable.
 
-    private static String format(State s) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{\n  \"groups\": [\n");
-        boolean first = true;
-        for (Group g : s.groups) {
-            if (!first) sb.append(",\n");
-            first = false;
-            sb.append("    {")
-              .append("\"id\":").append(jsonString(g.getId())).append(",")
-              .append("\"name\":").append(jsonString(g.getName())).append(",")
-              .append("\"description\":").append(jsonString(g.getDescription()))
-              .append("}");
-        }
-        sb.append("\n  ],\n  \"assignments\": {\n");
-        first = true;
-        for (Map.Entry<String, String> e : s.assignments.entrySet()) {
-            if (!first) sb.append(",\n");
-            first = false;
-            sb.append("    ")
-              .append(jsonString(e.getKey())).append(": ")
-              .append(jsonString(e.getValue()));
-        }
-        sb.append("\n  }\n}\n");
-        return sb.toString();
+    /** DTO for {@link State#groups}. Only fields present in the on-disk schema are declared. */
+    private static final class GroupDto {
+        public String id;
+        public String name;
+        public String description;
     }
 
-    private static String jsonString(String raw) {
-        if (raw == null) return "null";
-        StringBuilder sb = new StringBuilder("\"");
-        for (int i = 0; i < raw.length(); i++) {
-            char c = raw.charAt(i);
-            switch (c) {
-                case '"':  sb.append("\\\""); break;
-                case '\\': sb.append("\\\\"); break;
-                case '\b': sb.append("\\b");  break;
-                case '\f': sb.append("\\f");  break;
-                case '\n': sb.append("\\n");  break;
-                case '\r': sb.append("\\r");  break;
-                case '\t': sb.append("\\t");  break;
-                default:
-                    if (c < 0x20) {
-                        sb.append(String.format("\\u%04x", (int) c));
-                    } else {
-                        sb.append(c);
-                    }
-            }
+    /** Top-level DTO that mirrors the on-disk JSON document. */
+    private static final class DocumentDto {
+        public List<GroupDto> groups = new ArrayList<>();
+        public Map<String, String> assignments = new LinkedHashMap<>();
+    }
+
+    private static String format(State s) {
+        DocumentDto doc = new DocumentDto();
+        for (Group g : s.groups) {
+            GroupDto gd = new GroupDto();
+            gd.id = g.getId();
+            gd.name = g.getName();
+            gd.description = g.getDescription();
+            doc.groups.add(gd);
         }
-        sb.append('"');
-        return sb.toString();
+        doc.assignments = new LinkedHashMap<>(s.assignments);
+        return JSON.toJSONString(doc, JSONWriter.Feature.PrettyFormat);
     }
 
     private static State parse(String json) {
         State s = new State();
-        Parser p = new Parser(json);
-        p.skipWs();
-        p.expect('{');
-        p.skipWs();
-        // We expect key "groups" then key "assignments" in any order, but
-        // since we control the writer we only handle this canonical order.
-        p.expectKey("groups");
-        p.skipWs();
-        p.expect('[');
-        p.skipWs();
-        if (p.peek() != ']') {
-            while (true) {
-                p.skipWs();
-                p.expect('{');
-                String id = null, name = null, desc = null;
-                p.skipWs();
-                if (p.peek() != '}') {
-                    while (true) {
-                        String k = p.readString();
-                        p.skipWs();
-                        p.expect(':');
-                        p.skipWs();
-                        String v = p.readStringOrNull();
-                        switch (k) {
-                            case "id": id = v; break;
-                            case "name": name = v; break;
-                            case "description": desc = v; break;
-                            default: /* ignore unknown */
-                        }
-                        p.skipWs();
-                        if (p.peek() == ',') { p.advance(); continue; }
-                        break;
-                    }
+        // JSONReader.Feature.SupportSmartMatch lets numbers coerce to String fields
+        // (we store everything as String) without surprising type errors.
+        DocumentDto doc = JSON.parseObject(json, DocumentDto.class, JSONReader.Feature.SupportSmartMatch);
+        if (doc == null) return s;
+        if (doc.groups != null) {
+            for (GroupDto gd : doc.groups) {
+                if (gd == null || gd.id == null || gd.id.isEmpty()) continue;
+                s.groups.add(new Group(gd.id, gd.name, gd.description));
+            }
+        }
+        if (doc.assignments != null) {
+            for (Map.Entry<String, String> e : doc.assignments.entrySet()) {
+                if (e.getKey() != null && e.getValue() != null) {
+                    s.assignments.put(e.getKey(), e.getValue());
                 }
-                p.expect('}');
-                if (id != null) s.groups.add(new Group(id, name, desc));
-                p.skipWs();
-                if (p.peek() == ',') { p.advance(); continue; }
-                break;
             }
         }
-        p.expect(']');
-        p.skipWs();
-        if (p.peek() == ',') p.advance();
-        p.skipWs();
-        p.expectKey("assignments");
-        p.skipWs();
-        p.expect('{');
-        p.skipWs();
-        if (p.peek() != '}') {
-            while (true) {
-                String k = p.readString();
-                p.skipWs();
-                p.expect(':');
-                p.skipWs();
-                String v = p.readStringOrNull();
-                if (v != null) s.assignments.put(k, v);
-                p.skipWs();
-                if (p.peek() == ',') { p.advance(); continue; }
-                break;
-            }
-        }
-        p.expect('}');
-        p.skipWs();
-        if (p.peek() == ',') p.advance();
-        p.skipWs();
-        p.expect('}');
         return s;
-    }
-
-    /** Tiny hand-rolled JSON parser sufficient for our canonical format. */
-    private static final class Parser {
-        private final String src;
-        private int pos;
-        Parser(String src) { this.src = src; this.pos = 0; }
-        char peek() { return src.charAt(pos); }
-        void advance() { pos++; }
-        void skipWs() {
-            while (pos < src.length() && Character.isWhitespace(src.charAt(pos))) pos++;
-        }
-        void expect(char c) {
-            if (pos >= src.length() || src.charAt(pos) != c) {
-                throw new IllegalStateException("Expected '" + c + "' at " + pos);
-            }
-            pos++;
-        }
-        void expectKey(String key) {
-            skipWs();
-            String s = readString();
-            if (!key.equals(s)) throw new IllegalStateException("Expected key '" + key + "' got '" + s + "'");
-        }
-        String readString() {
-            expect('"');
-            StringBuilder sb = new StringBuilder();
-            while (pos < src.length()) {
-                char c = src.charAt(pos++);
-                if (c == '"') return sb.toString();
-                if (c == '\\') {
-                    char e = src.charAt(pos++);
-                    switch (e) {
-                        case '"':  sb.append('"');  break;
-                        case '\\': sb.append('\\'); break;
-                        case '/':  sb.append('/');  break;
-                        case 'b':  sb.append('\b'); break;
-                        case 'f':  sb.append('\f'); break;
-                        case 'n':  sb.append('\n'); break;
-                        case 'r':  sb.append('\r'); break;
-                        case 't':  sb.append('\t'); break;
-                        case 'u':
-                            int cp = Integer.parseInt(src.substring(pos, pos + 4), 16);
-                            sb.append((char) cp);
-                            pos += 4;
-                            break;
-                        default: throw new IllegalStateException("Bad escape: \\" + e);
-                    }
-                } else {
-                    sb.append(c);
-                }
-            }
-            throw new IllegalStateException("Unterminated string");
-        }
-        String readStringOrNull() {
-            skipWs();
-            if (peek() == 'n') {
-                if (src.startsWith("null", pos)) { pos += 4; return null; }
-            }
-            return readString();
-        }
     }
 
     /** Used by tests to start clean. */
